@@ -7,24 +7,26 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Launch Program",
-      "program": "${workspaceFolder}/examples/array-change.js"
+      "name": "tap (current file)",
+      "program": "${workspaceFolder}/node_modules/.bin/tap",
+      "args": ["${relativeFile}"],
+      "cwd": "${workspaceFolder}"
     },
     {
-      "name": "Run mocha",
+      "name": "ts-node (current file)",
       "type": "node",
       "request": "launch",
-      "program": "${workspaceRoot}/node_modules/mocha/bin/_mocha",
-      "stopOnEntry": false,
-      "args": [
-        "test/**/*.js",
-        "--no-timeouts"
+      "args": ["${relativeFile}"],
+      "runtimeArgs": [
+        "-r",
+        "tsconfig-paths/register",
+        "-r",
+        "ts-node/register",
+        "--loader",
+        "ts-node/esm"
       ],
       "cwd": "${workspaceRoot}",
-      "runtimeExecutable": null,
-      "env": {
-        "NODE_ENV": "testing"
-      }
+      "internalConsoleOptions": "openOnSessionStart"
     }
   ]
 }
