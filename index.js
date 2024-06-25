@@ -1,27 +1,27 @@
-;(function(root, factory) { // eslint-disable-line no-extra-semi
+; (function (root, factory) { // eslint-disable-line no-extra-semi
   var deepDiff = factory(root);
   // eslint-disable-next-line no-undef
   if (typeof define === 'function' && define.amd) {
-      // AMD
-      define('DeepDiff', function() { // eslint-disable-line no-undef
-          return deepDiff;
-      });
+    // AMD
+    define('DeepDiff', function () { // eslint-disable-line no-undef
+      return deepDiff;
+    });
   } else if (typeof exports === 'object' || typeof navigator === 'object' && navigator.product.match(/ReactNative/i)) {
-      // Node.js or ReactNative
-      module.exports = deepDiff;
+    // Node.js or ReactNative
+    module.exports = deepDiff;
   } else {
-      // Browser globals
-      var _deepdiff = root.DeepDiff;
-      deepDiff.noConflict = function() {
-          if (root.DeepDiff === deepDiff) {
-              root.DeepDiff = _deepdiff;
-          }
-          return deepDiff;
-      };
-      root.DeepDiff = deepDiff;
+    // Browser globals
+    var _deepdiff = root.DeepDiff;
+    deepDiff.noConflict = function () {
+      if (root.DeepDiff === deepDiff) {
+        root.DeepDiff = _deepdiff;
+      }
+      return deepDiff;
+    };
+    root.DeepDiff = deepDiff;
   }
-}(this, function(root) {
-  var validKinds = ['N', 'E', 'A', 'D'];
+}(this, function (root) {
+  var validKinds = ['N', 'E', 'A', 'D', 'M'];
 
   // nodejs compatible on server side and in the browser.
   function inherits(ctor, superCtor) {
@@ -93,10 +93,56 @@
   }
   inherits(DiffArray, Diff);
 
+  function DiffArrayMove(path, keys) {
+    DiffArrayMove.super_.call(this, 'M', path);
+    Object.defineProperty(this, 'keys', {
+      value: keys,
+      enumerable: true
+    });
+  }
+  inherits(DiffArrayMove, Diff);
+
   function arrayRemove(arr, from, to) {
     var rest = arr.slice((to || from) + 1 || arr.length);
     arr.length = from < 0 ? arr.length + from : from;
     arr.push.apply(arr, rest);
+    return arr;
+  }
+
+  function findItemByKey(arr, key, callback) {
+    for (var i = 0; i < arr.length; i++) {
+      if (callback(arr[i]) === key) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function arrayReorder(arr, keys, getElementKey) {
+    const newArr = [];
+    const keyMap = {};
+    keys.forEach((item) => {
+      keyMap[item.key] = true;
+    });
+
+    // Add elements in the order of keys
+    keys.forEach((item) => {
+      const index = findItemByKey(arr, item.key, getElementKey);
+      if (index !== -1) {
+        newArr.push(arr[index]);
+      }
+    });
+
+    // Append remaining elements from the original array in the same order
+    arr.forEach(el => {
+      if (!keyMap[getElementKey(el)]) {
+        newArr.push(el);
+      }
+    });
+
+
+    arr = [...newArr];
+
     return arr;
   }
 
@@ -164,7 +210,8 @@
     return accum + hashThisString(stringToHash);
   }
 
-  function deepDiff(lhs, rhs, changes, prefilter, path, key, stack, orderIndependent) {
+
+  function deepDiff(lhs, rhs, changes, prefilter, path, key, stack, orderIndependent, callback) {
     changes = changes || [];
     path = path || [];
     stack = stack || [];
@@ -224,27 +271,70 @@
       if (!other) {
         stack.push({ lhs: lhs, rhs: rhs });
         if (Array.isArray(lhs)) {
-          // If order doesn't matter, we need to sort our arrays
-          if (orderIndependent) {
-            lhs.sort(function (a, b) {
-              return getOrderIndependentHash(a) - getOrderIndependentHash(b);
+          // Call the callback function to get the element key function
+          var getElementKey = callback ? callback(currentPath) : null;
+
+          if (!getElementKey) {
+            // If order doesn't matter, we need to sort our arrays
+            if (orderIndependent) {
+              lhs.sort(function (a, b) {
+                return getOrderIndependentHash(a) - getOrderIndependentHash(b);
+              });
+
+              rhs.sort(function (a, b) {
+                return getOrderIndependentHash(a) - getOrderIndependentHash(b);
+              });
+            }
+            i = rhs.length - 1;
+            j = lhs.length - 1;
+            while (i > j) {
+              changes.push(new DiffArray(currentPath, i, new DiffNew(undefined, rhs[i--])));
+            }
+            while (j > i) {
+              changes.push(new DiffArray(currentPath, j, new DiffDeleted(undefined, lhs[j--])));
+            }
+            for (; i >= 0; --i) {
+              deepDiff(lhs[i], rhs[i], changes, prefilter, currentPath, i, stack, orderIndependent);
+            }
+          }
+          else {
+            // Create a map of keys to indices for the old array
+            var lhsKeys = lhs.map((el, idx) => ({ key: getElementKey(el, idx), index: idx }));
+            var rhsKeys = rhs.map((el, idx) => ({ key: getElementKey(el, idx), index: idx }));
+
+            var lhsKeyMap = {};
+            var rhsKeyMap = {};
+
+            lhsKeys.forEach(item => { lhsKeyMap[item.key] = item.index; });
+            rhsKeys.forEach(item => { rhsKeyMap[item.key] = item.index; });
+
+            // Detect removed and added elements
+            lhsKeys.forEach(({ key: K, index }) => {
+              if (!(K in rhsKeyMap)) {
+                changes.push(new DiffArray(currentPath, index, new DiffDeleted(undefined, lhs[index])));
+              }
             });
 
-            rhs.sort(function (a, b) {
-              return getOrderIndependentHash(a) - getOrderIndependentHash(b);
+            rhsKeys.forEach(({ key: K, index }) => {
+              if (!(K in lhsKeyMap)) {
+                changes.push(new DiffArray(currentPath, index, new DiffNew(undefined, rhs[index])));
+              }
+            });
+
+            // Detect moved elements
+            let isMoveHandled = false;
+            rhsKeys.forEach(({ key: K, index }) => {
+              if (K in lhsKeyMap) {
+                var lhsIndex = lhsKeyMap[K];
+                if (lhsIndex !== index && isMoveHandled === false) {
+                  changes.push(new DiffArrayMove(currentPath, rhsKeys));
+                  isMoveHandled = true;
+                }
+                deepDiff(lhs[lhsIndex], rhs[index], changes, prefilter, currentPath, index, stack, orderIndependent, callback);
+              }
             });
           }
-          i = rhs.length - 1;
-          j = lhs.length - 1;
-          while (i > j) {
-            changes.push(new DiffArray(currentPath, i, new DiffNew(undefined, rhs[i--])));
-          }
-          while (j > i) {
-            changes.push(new DiffArray(currentPath, j, new DiffDeleted(undefined, lhs[j--])));
-          }
-          for (; i >= 0; --i) {
-            deepDiff(lhs[i], rhs[i], changes, prefilter, currentPath, i, stack, orderIndependent);
-          }
+
         } else {
           var akeys = Object.keys(lhs).concat(Object.getOwnPropertySymbols(lhs));
           var pkeys = Object.keys(rhs).concat(Object.getOwnPropertySymbols(rhs));
@@ -252,16 +342,16 @@
             k = akeys[i];
             other = pkeys.indexOf(k);
             if (other >= 0) {
-              deepDiff(lhs[k], rhs[k], changes, prefilter, currentPath, k, stack, orderIndependent);
+              deepDiff(lhs[k], rhs[k], changes, prefilter, currentPath, k, stack, orderIndependent, callback);
               pkeys[other] = null;
             } else {
-              deepDiff(lhs[k], undefined, changes, prefilter, currentPath, k, stack, orderIndependent);
+              deepDiff(lhs[k], undefined, changes, prefilter, currentPath, k, stack, orderIndependent, callback);
             }
           }
           for (i = 0; i < pkeys.length; ++i) {
             k = pkeys[i];
             if (k) {
-              deepDiff(undefined, rhs[k], changes, prefilter, currentPath, k, stack, orderIndependent);
+              deepDiff(undefined, rhs[k], changes, prefilter, currentPath, k, stack, orderIndependent, callback);
             }
           }
         }
@@ -277,9 +367,9 @@
     }
   }
 
-  function observableDiff(lhs, rhs, observer, prefilter, orderIndependent) {
+  function observableDiff(lhs, rhs, observer, prefilter, orderIndependent, callback) {
     var changes = [];
-    deepDiff(lhs, rhs, changes, prefilter, null, null, null, orderIndependent);
+    deepDiff(lhs, rhs, changes, prefilter, null, null, null, orderIndependent, callback);
     if (observer) {
       for (var i = 0; i < changes.length; ++i) {
         observer(changes[i]);
@@ -314,7 +404,7 @@
     return (accum) ? accum : (changes.length) ? changes : undefined;
   }
 
-  function applyArrayChange(arr, index, change) {
+  function applyArrayChange(arr, index, change, callback) {
     if (change.path && change.path.length) {
       var it = arr[index],
         i, u = change.path.length - 1;
@@ -332,6 +422,12 @@
         case 'N':
           it[change.path[i]] = change.rhs;
           break;
+        case 'M':
+          {
+            var getElementKey = callback ? callback(change.path) : (el, idx) => idx;
+            arr = arrayReorder(arr, change.keys, getElementKey);
+            break;
+          }
       }
     } else {
       switch (change.kind) {
@@ -345,12 +441,18 @@
         case 'N':
           arr[index] = change.rhs;
           break;
+        case 'M':
+          {
+            const getElementKey1 = callback ? callback(change.path) : (el, idx) => idx;
+            arr = arrayReorder(arr, change.keys, getElementKey1);
+            break;
+          }
       }
     }
     return arr;
   }
 
-  function applyChange(target, source, change) {
+  function applyChange(target, source, change, callback) {
     if (typeof change === 'undefined' && source && ~validKinds.indexOf(source.kind)) {
       change = source;
     }
@@ -369,7 +471,7 @@
           if (change.path && typeof it[change.path[i]] === 'undefined') {
             it[change.path[i]] = [];
           }
-          applyArrayChange(change.path ? it[change.path[i]] : it, change.index, change.item);
+          applyArrayChange(change.path ? it[change.path[i]] : it, change.index, change.item, callback);
           break;
         case 'D':
           delete it[change.path[i]];
@@ -378,6 +480,20 @@
         case 'N':
           it[change.path[i]] = change.rhs;
           break;
+        case 'M':
+          {
+            const getElementKey = callback ? callback(change.path) : (el, idx) => idx;
+            const result = arrayReorder(
+              change.path ? it[change.path[i]] : it
+              , change.keys, getElementKey);
+            if (change.path) {
+              it[change.path[i]] = result;
+            }
+            else {
+              it = result;
+            }
+            break;
+          }
       }
     }
   }

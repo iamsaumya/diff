@@ -274,7 +274,7 @@
           var prefilter = function (path, key) {
             return key === 'supportedBy';
           };
-          var diff = deep(lhs, rhs, {prefilter: prefilter});
+          var diff = deep(lhs, rhs, { prefilter: prefilter });
           expect(diff).to.be.ok();
           expect(diff.length).to.be(2);
           expect(diff[0]).to.have.property('kind');
@@ -819,6 +819,255 @@
         expect(diff.length).to.be.ok();
       });
 
+
+    });
+
+    describe('Array diffing tests with DiffArrayMove', function () {
+      it('should handle reordering elements in an array', function () {
+        const lhs = [1, 2, 3];
+        const rhs = [3, 1, 2];
+
+        const diff = deep.observableDiff(lhs, rhs, null, null, false, () => (el) => el);
+        expect(diff).to.be.ok();
+        expect(diff).to.be.an('array');
+        expect(diff).to.have.length(1);
+
+
+        // Checking if all elements were moved
+        const moveDiffs = diff.filter(d => d.kind === 'M');
+        expect(moveDiffs).to.have.length(1);
+        moveDiffs.forEach(d => {
+          expect(d).to.have.property('keys');
+          expect(d.keys).to.be.an('array');
+          expect(d.keys).to.eql( [
+            {
+              'key': 3,
+              'index': 0
+            },
+            {
+              'key': 1,
+              'index': 1
+            },
+            {
+              'key': 2,
+              'index': 2
+            }
+          ]);
+        });
+      });
+
+      it('should handle adding elements to an array', function () {
+        const lhs = [1, 2, 3];
+        const rhs = [1, 2, 3, 4];
+
+        const diff = deep.observableDiff(lhs, rhs, null, null, false, () => (el) => el);
+
+        expect(diff).to.be.ok();
+        expect(diff).to.be.an('array');
+        expect(diff).to.have.length(1);
+
+        // Checking if the new element was added
+        const addDiff = diff.find(d => d.kind === 'A' && d.item.kind === 'N');
+        expect(addDiff).to.be.ok();
+        expect(addDiff).to.have.property('item');
+        expect(addDiff.item).to.have.property('rhs');
+        expect(addDiff.item.rhs).to.be(4);
+      });
+
+      it('should handle deleting elements from an array', function () {
+        const lhs = [1, 2, 3, 4];
+        const rhs = [1, 2, 3];
+
+        const diff = deep.observableDiff(lhs, rhs, null, null, false, () => (el) => el);
+
+        expect(diff).to.be.ok();
+        expect(diff).to.be.an('array');
+        expect(diff).to.have.length(1);
+
+        // Checking if the element was deleted
+        const delDiff = diff.find(d => d.kind === 'A' && d.item.kind === 'D');
+        expect(delDiff).to.be.ok();
+        expect(delDiff).to.have.property('item');
+        expect(delDiff.item).to.have.property('lhs');
+        expect(delDiff.item.lhs).to.be(4);
+      });
+
+      it('should handle updating elements in an array', function () {
+        const lhs = [{ id: 1, name: 'John' }, { id: 2, name: 'Jane' }];
+        const rhs = [{ id: 1, name: 'John' }, { id: 2, name: 'Janet' }];
+
+        const diff = deep.observableDiff(lhs, rhs, null, null, false, () => (el) => el.id);
+
+        expect(diff).to.be.ok();
+        expect(diff).to.be.an('array');
+        expect(diff).to.have.length(1);
+
+        // Checking if the element was updated
+        const updateDiff = diff.find(d => d.kind === 'E');
+        expect(updateDiff).to.be.ok();
+        expect(updateDiff).to.have.property('lhs');
+        expect(updateDiff.path[1]).to.be('name');
+        expect(updateDiff.lhs).to.be('Jane');
+        expect(updateDiff).to.have.property('rhs');
+        expect(updateDiff.rhs).to.be('Janet');
+      });
+
+      it('should handle complex changes in an array', function () {
+        const lhs = [
+          { id: 1, name: 'John' },
+          { id: 2, name: 'Jane' },
+          { id: 3, name: 'Jake' }
+        ];
+        const rhs = [
+          { id: 3, name: 'Jake' }, // moved
+          { id: 2, name: 'Janet' }, // updated
+          { id: 4, name: 'Jill' } // added
+        ];
+
+        const diff = deep.observableDiff(lhs, rhs, null, null, false, () => (el) => el.id);
+
+        expect(diff).to.be.ok();
+        expect(diff).to.be.an('array');
+        expect(diff).to.have.length(4);
+
+        // Checking if elements were moved
+        const moveDiffs = diff.filter(d => d.kind === 'M');
+        expect(moveDiffs).to.have.length(1);
+
+
+
+        // Checking if an element was updated
+        const updateDiff = diff.find(d => d.kind === 'E');
+        expect(updateDiff).to.be.ok();
+        expect(updateDiff).to.have.property('lhs');
+        expect(updateDiff.lhs).to.be('Jane');
+        expect(updateDiff).to.have.property('rhs');
+        expect(updateDiff.rhs).to.be('Janet');
+
+        // Checking if an element was added
+        const addDiff = diff.find(d => d.kind === 'A' && d.item.kind === 'N');
+        expect(addDiff).to.be.ok();
+        expect(addDiff).to.have.property('item');
+        expect(addDiff.item).to.have.property('rhs');
+        expect(addDiff.item.rhs.name).to.be('Jill');
+
+        // Checking if an element was deleted
+        const delDiff = diff.find(d => d.kind === 'A' && d.item.kind === 'D');
+        expect(delDiff).to.be.ok();
+        expect(delDiff).to.have.property('item');
+        expect(delDiff.item).to.have.property('lhs');
+        expect(delDiff.item.lhs.name).to.be('John');
+      });
+
+      // it('should handle reordering and updating nested properties in array of objects', function () {
+      //   const lhs = [
+      //     { id: 1, name: 'Column1', style: { padding: '10px', margin: '5px' } },
+      //     { id: 2, name: 'Column2', style: { padding: '12px', margin: '6px' } },
+      //     { id: 3, name: 'Column3', style: { padding: '14px', margin: '7px' } }
+      //   ];
+      //   const rhs = [
+      //     { id: 3, name: 'Column3', style: { padding: '14px', margin: '8px' } }, // moved and margin updated
+      //     { id: 1, name: 'Column1', style: { padding: '10px', margin: '5px' } }, // moved
+      //     { id: 2, name: 'Column2', style: { padding: '16px', margin: '6px' } } // padding updated
+      //   ];
+
+      //   const diff = deep.observableDiff(lhs, rhs, null, null, false, () => (el) => el.id);
+
+      //   expect(diff).to.be.ok();
+      //   expect(diff).to.be.an('array');
+      //   expect(diff).to.have.length(4);
+
+      //   // Checking if elements were moved
+      //   const moveDiffs = diff.filter(d => d.kind === 'M');
+      //   expect(moveDiffs).to.have.length(2);
+      //   moveDiffs.forEach(d => {
+      //     expect(d).to.have.property('fromIndex');
+      //     expect(d).to.have.property('toIndex');
+      //     expect(d).to.have.property('item');
+      //   });
+
+      //   // Checking if nested properties were updated
+      //   const updateDiffs = diff.filter(d => d.kind === 'E');
+      //   expect(updateDiffs).to.have.length(2);
+
+      //   const marginUpdateDiff = updateDiffs.find(d => d.path[2] === 'margin');
+      //   expect(marginUpdateDiff).to.be.ok();
+      //   expect(marginUpdateDiff.lhs).to.be('7px');
+      //   expect(marginUpdateDiff.rhs).to.be('8px');
+
+      //   const paddingUpdateDiff = updateDiffs.find(d => d.path[2] === 'padding');
+      //   expect(paddingUpdateDiff).to.be.ok();
+      //   expect(paddingUpdateDiff.lhs).to.be('12px');
+      //   expect(paddingUpdateDiff.rhs).to.be('16px');
+      // });
+
+
+      it('should handle adding, deleting, and updating nested properties in array of objects', function () {
+        const lhs = [
+          { id: 1, name: 'Column1', style: { padding: '10px', margin: '5px' } },
+          { id: 2, name: 'Column2', style: { padding: '12px', margin: '6px' } },
+          { id: 3, name: 'Column3', style: { padding: '14px', margin: '7px' } }
+        ];
+        const rhs = [
+          { id: 1, name: 'Column1', style: { padding: '10px', margin: '5px' } },
+          { id: 2, name: 'Column2', style: { padding: '12px', margin: '8px' } }, // margin updated
+          { id: 4, name: 'Column4', style: { padding: '16px', margin: '10px' } } // added
+        ];
+
+        const diff = deep.observableDiff(lhs, rhs, null, null, false, () => (el) => el.id);
+
+        expect(diff).to.be.ok();
+        expect(diff).to.be.an('array');
+        expect(diff).to.have.length(3);
+
+        // Checking if an element was added
+        const addDiff = diff.find(d => d.kind === 'A' && d.item.kind === 'N');
+        expect(addDiff).to.be.ok();
+        expect(addDiff).to.have.property('item');
+        expect(addDiff.item).to.have.property('rhs');
+        expect(addDiff.item.rhs.name).to.be('Column4');
+
+        // Checking if an element was deleted
+        const delDiff = diff.find(d => d.kind === 'A' && d.item.kind === 'D');
+        expect(delDiff).to.be.ok();
+        expect(delDiff).to.have.property('item');
+        expect(delDiff.item).to.have.property('lhs');
+        expect(delDiff.item.lhs.name).to.be('Column3');
+
+        // Checking if a nested property was updated
+        const updateDiff = diff.find(d => d.kind === 'E' && d.path.includes('margin'));
+        expect(updateDiff).to.be.ok();
+        expect(updateDiff).to.have.property('lhs');
+        expect(updateDiff.lhs).to.be('6px');
+        expect(updateDiff).to.have.property('rhs');
+        expect(updateDiff.rhs).to.be('8px');
+      });
+
+      it('should apply reordering and updating nested properties in array of objects', function () {
+        const lhs = {
+          'columns': [
+            { id: 'a1', name: 'Column1', style: { padding: '10px', margin: '5px' } },
+            { id: 'a2', name: 'Column2', style: { padding: '12px', margin: '6px' } },
+            { id: 'a3', name: 'Column3', style: { padding: '14px', margin: '2px' } }
+          ]
+        };
+        const rhs =
+          {
+            'columns': [{ id: 'a3', name: 'Column3', style: { padding: '14px', margin: '8px' } }, // moved and margin updated
+              { id: 'a2', name: 'Column2', style: { padding: '16px', margin: '6px' } }, // padding updated
+              { id: 'a1', name: 'Column1', style: { padding: '0px', margin: '5px' } }, // moved
+              { id: 'a4', name: 'Column1', style: { padding: '0px', margin: '5px' } }] // moved]
+          };
+
+        const diff = deep.observableDiff(lhs, rhs, null, null, false, () => (el) => el.id);
+
+        let result = JSON.parse(JSON.stringify(lhs));
+        diff.forEach(change => {
+          deep.applyChange(result, lhs, change, () => (el) => el.id);
+        });
+
+        expect(result).to.eql(rhs);
+      });
 
     });
 
